@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Đọc Truyện — Story Reader</title>
+<style>
+:root{
+  --paper:#f6f1e6; --ink:#2b2620; --ink-soft:#5a5145; --accent:#2f6f62;
+  --accent-soft:#dfe9e4; --rule:#ded4bd; --panel:#fffdf8;
+  --r-fs:18px; --r-lh:1.7; --r-ps:1em; --r-cw:760px;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]):not([data-theme="sepia"]){
+    --paper:#17171a; --ink:#e9e4d8; --ink-soft:#b3ac9c; --accent:#6fbfa8;
+    --accent-soft:#23342f; --rule:#34332e; --panel:#1f2023;
+  }
+}
+:root[data-theme="dark"]{--paper:#17171a; --ink:#e9e4d8; --ink-soft:#b3ac9c; --accent:#6fbfa8; --accent-soft:#23342f; --rule:#34332e; --panel:#1f2023;}
+:root[data-theme="sepia"]{--paper:#f1e4c3; --ink:#4b3621; --ink-soft:#7a6142; --accent:#8a5a2b; --accent-soft:#e6d3a8; --rule:#ddc79a; --panel:#f8edd3;}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;transition:background-color .2s,color .2s}
+button{font:inherit;color:inherit;cursor:pointer}
+input[type=range]{accent-color:var(--accent)}
+.hide{display:none !important}
+/* Library */
+#lib{max-width:640px;margin:0 auto;padding:32px 20px 64px}
+#lib h1{font-size:28px;margin:0 0 6px;letter-spacing:-.01em}
+#lib p.sub{margin:0 0 24px;color:var(--ink-soft);font-size:15px;line-height:1.5}
+.drop{display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px dashed var(--rule);border-radius:10px;padding:28px 16px;background:var(--panel);position:relative}
+.drop.active{border-color:var(--accent);background:var(--accent-soft)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop span strong{color:var(--ink)}
+.drop span{color:var(--ink-soft);font-size:15px}
+#err{color:#b3382c;font-size:14px;margin-top:12px}
+#empty{margin-top:32px;color:var(--ink-soft);text-align:center;font-size:15px}
+#list{list-style:none;margin:28px 0 0;padding:0;border-top:1px solid var(--rule)}
+#list li{display:flex;border-bottom:1px solid var(--rule)}
+#list button.open{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:4px;background:none;border:none;text-align:left;padding:16px 4px}
+#list .t{font-size:17px}
+#list .m{font-size:13px;color:var(--ink-soft)}
+#list button.del{border:none;background:none;color:var(--ink-soft);font-size:13px;padding:0 4px}
+#list button.del:hover{color:#b3382c}
+/* Reader */
+#reader{display:none;min-height:100%}
+#rhead{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 10px) 8px 10px;background:var(--paper);backdrop-filter:blur(6px);border-bottom:1px solid var(--rule)}
+#rhead button{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:none;border:none;border-radius:8px;font-size:18px}
+#rhead button:hover{background:var(--accent-soft)}
+#rtitle{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;background:none;border:none;padding:2px 4px}
+#rtitle .b{font-size:14px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#rtitle .c{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#content{width:100%;max-width:100vw;overflow-x:hidden;padding:24px 0 120px}
+#inner{width:100%;max-width:var(--r-cw);margin:0 auto;padding:0 20px;font-size:var(--r-fs);line-height:var(--r-lh);overflow-wrap:anywhere;word-break:normal;hyphens:auto}
+#inner h2{font-size:1.35em;line-height:1.3;margin:2em 0 1em;font-weight:700;scroll-margin-top:72px}
+#inner section:first-of-type h2{margin-top:.4em}
+#inner p{margin:0 0 var(--r-ps)}
+#toolbar{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 10px);background:var(--paper);backdrop-filter:blur(6px);border-top:1px solid var(--rule)}
+#toolbar .step{width:44px;height:40px;border-radius:8px;border:1px solid var(--rule);background:var(--panel)}
+#toolbar .step:disabled{opacity:.4;cursor:not-allowed}
+#toolbar .fs{min-width:52px;text-align:center;font-size:14px;color:var(--ink-soft)}
+#toolbar .settingsBtn{margin-left:12px;height:40px;padding:0 14px;border-radius:8px;border:1px solid var(--rule);background:var(--panel);font-size:14px;white-space:nowrap}
+/* overlays */
+.overlay{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.35);display:none}
+.overlay.show{display:flex}
+#chapOverlay{justify-content:flex-end}
+#chapPanel{width:min(340px,86vw);height:100%;overflow-y:auto;background:var(--panel);padding:calc(env(safe-area-inset-top,0px)+16px) 16px 24px}
+#setOverlay{align-items:flex-end;justify-content:center}
+@media(min-width:640px){#setOverlay{align-items:center}#setSheet{border-radius:16px !important;max-height:80vh !important}}
+#setSheet{width:100%;max-width:480px;max-height:86vh;overflow-y:auto;background:var(--panel);border-radius:16px 16px 0 0;padding:16px 20px calc(env(safe-area-inset-bottom,0px)+24px)}
+.ovHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.ovHead h2{font-size:17px;margin:0}
+.ovHead button{border:none;background:none;font-size:16px;color:var(--ink-soft);padding:6px}
+#chapList{list-style:none;margin:0;padding:0}
+#chapList button{width:100%;text-align:left;border:none;background:none;color:var(--ink);padding:12px 8px;font-size:15px;border-radius:8px}
+#chapList button:hover{background:var(--accent-soft)}
+#chapList button.active{color:var(--accent);font-weight:600}
+.grp{margin:18px 0}
+.grp label{display:block;font-size:13px;color:var(--ink-soft);margin-bottom:8px}
+.grp input[type=range]{width:100%}
+.pillRow{display:flex;flex-wrap:wrap;gap:8px}
+.pill{padding:8px 14px;border-radius:999px;border:1px solid var(--rule);background:var(--paper);font-size:14px}
+.pill.active{border-color:var(--accent);background:var(--accent-soft);font-weight:600}
+#resetBtn{margin-top:8px;width:100%;padding:12px;border-radius:8px;border:1px solid var(--rule);background:none;color:var(--ink-soft);font-size:14px}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+<div id="lib">
+  <h1>Thư viện truyện</h1>
+  <p class="sub">Đọc truyện dài thoải mái — chữ luôn tự xuống dòng, không cần kéo ngang.</p>
+  <label class="drop" id="drop">
+    <input type="file" id="fileInput" accept=".txt,.md,.markdown,.pdf" multiple />
+    <span><strong>Chọn file</strong> hoặc kéo thả .txt / .md / .pdf vào đây</span>
+  </label>
+  <p id="status" class="hide" style="margin-top:12px;color:var(--ink-soft);font-size:14px"></p>
+  <p id="err" class="hide" role="alert"></p>
+  <p id="empty">Chưa có truyện nào. Tải lên một file để bắt đầu đọc.</p>
+  <ul id="list"></ul>
+</div>
+
+<div id="reader">
+  <header id="rhead">
+    <button id="backBtn" aria-label="Quay lại thư viện">←</button>
+    <button id="rtitle"><span class="b" id="bookTitleLbl"></span><span class="c" id="chapTitleLbl"></span></button>
+    <button id="openSettingsTop" aria-label="Mở cài đặt">⚙</button>
+  </header>
+  <main id="content"><div id="inner"></div></main>
+  <div id="toolbar">
+    <button class="step" id="decBtn" aria-label="Giảm cỡ chữ">A−</button>
+    <span class="fs" id="fsLabel">18px</span>
+    <button class="step" id="incBtn" aria-label="Tăng cỡ chữ">A+</button>
+    <button class="settingsBtn" id="openSettingsBottom">⚙ Cài đặt</button>
+  </div>
+</div>
+
+<div class="overlay" id="chapOverlay">
+  <div id="chapPanel" role="dialog" aria-label="Mục lục chương">
+    <div class="ovHead"><h2>Mục lục</h2><button id="closeChap" aria-label="Đóng">✕</button></div>
+    <ul id="chapList"></ul>
+  </div>
+</div>
+
+<div class="overlay" id="setOverlay">
+  <div id="setSheet" role="dialog" aria-label="Cài đặt hiển thị">
+    <div class="ovHead"><h2>Cài đặt hiển thị</h2><button id="closeSet" aria-label="Đóng">✕</button></div>
+    <div class="grp"><label id="lblFs">Cỡ chữ</label><input type="range" id="rangeFs" min="12" max="36" step="1"></div>
+    <div class="grp"><label id="lblLh">Giãn dòng</label><input type="range" id="rangeLh" min="1.2" max="2.4" step="0.1"></div>
+    <div class="grp"><label id="lblPs">Khoảng cách đoạn văn</label><input type="range" id="rangePs" min="0.4" max="2.2" step="0.1"></div>
+    <div class="grp"><label id="lblCw">Chiều rộng cột đọc (desktop)</label><input type="range" id="rangeCw" min="480" max="960" step="20"></div>
+    <div class="grp"><span>Font chữ</span><div class="pillRow" id="fontPills"></div></div>
+    <div class="grp"><span>Giao diện</span><div class="pillRow" id="themePills"></div></div>
+    <button id="resetBtn">Khôi phục mặc định</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var LS = {settings:'reader:settings', library:'reader:library', progress:'reader:progress', lastBook:'reader:lastBook'};
+function get(k,fb){try{var v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch(e){return fb;}}
+function set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+
+var DEFAULTS = {fontSize:18, lineHeight:1.7, fontFamily:'vnSerif', theme:null, paragraphSpacing:1, contentWidth:760};
+var FONTS = {
+  sans: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif",
+  serif: "Georgia,'Times New Roman','Noto Serif',serif",
+  georgia: "Georgia,'Times New Roman',serif",
+  vnSerif: "'Noto Serif','Times New Roman',Georgia,serif"
+};
+var FONT_OPTS = [['sans','Sans-serif'],['serif','Serif'],['georgia','Georgia'],['vnSerif','Serif (tiếng Việt)']];
+var THEME_OPTS = [[null,'Hệ thống'],['light','Sáng'],['dark','Tối'],['sepia','Giấy cũ']];
+
+var pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+if(pdfjsLib){ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }
+
+var settings = Object.assign({}, DEFAULTS, get(LS.settings, {}));
+var library = get(LS.library, {});
+var currentBook = null, currentChapterId = null, restored = false, observer = null;
+
+function saveSettings(){ set(LS.settings, settings); applySettings(); }
+function applySettings(){
+  document.documentElement.style.setProperty('--r-fs', settings.fontSize+'px');
+  document.documentElement.style.setProperty('--r-lh', settings.lineHeight);
+  document.documentElement.style.setProperty('--r-ps', settings.paragraphSpacing+'em');
+  document.documentElement.style.setProperty('--r-cw', settings.contentWidth+'px');
+  document.getElementById('inner').style.fontFamily = FONTS[settings.fontFamily];
+  if(settings.theme) document.documentElement.setAttribute('data-theme', settings.theme);
+  else document.documentElement.removeAttribute('data-theme');
+  document.getElementById('fsLabel').textContent = settings.fontSize+'px';
+  document.getElementById('rangeFs').value = settings.fontSize;
+  document.getElementById('rangeLh').value = settings.lineHeight;
+  document.getElementById('rangePs').value = settings.paragraphSpacing;
+  document.getElementById('rangeCw').value = settings.contentWidth;
+  document.getElementById('lblFs').textContent = 'Cỡ chữ — '+settings.fontSize+'px';
+  document.getElementById('lblLh').textContent = 'Giãn dòng — '+settings.lineHeight.toFixed(1);
+  document.getElementById('lblPs').textContent = 'Khoảng cách đoạn văn — '+settings.paragraphSpacing.toFixed(1)+'em';
+  document.getElementById('lblCw').textContent = 'Chiều rộng cột đọc (desktop) — '+settings.contentWidth+'px';
+  renderPills('fontPills', FONT_OPTS, settings.fontFamily, function(v){settings.fontFamily=v; saveSettings();});
+  renderPills('themePills', THEME_OPTS, settings.theme, function(v){settings.theme=v; saveSettings();});
+  document.getElementById('decBtn').disabled = settings.fontSize<=12;
+  document.getElementById('incBtn').disabled = settings.fontSize>=36;
+}
+function renderPills(id, opts, active, onClick){
+  var el = document.getElementById(id); el.innerHTML='';
+  opts.forEach(function(o){
+    var b=document.createElement('button');
+    b.className='pill'+(o[0]===active?' active':'');
+    b.textContent=o[1];
+    b.onclick=function(){onClick(o[0]);};
+    el.appendChild(b);
+  });
+}
+
+/* ---- parsing ---- */
+var CHAP_RE = /^\s*(chương|chapter|hồi|phần)\s+[\divxlcdmIVXLCDM]+\b.*$/i;
+function isHeading(line){var t=line.trim(); return t && t.length<=80 && CHAP_RE.test(t);}
+function splitParas(block){
+  return block.split(/\r?\n\s*\r?\n/).map(function(p){return p.replace(/\r?\n/g,' ').trim();}).filter(Boolean);
+}
+function parseText(raw, title, isMd){
+  var normalized = raw.replace(/^\uFEFF/, '');
+  var lines = normalized.split(/\r?\n/);
+  var chapters=[], curTitle='Nội dung', curLines=[], idx=0, saw=false;
+  function flush(){
+    var text=curLines.join('\n'); var paras=splitParas(text);
+    if(paras.length>0 || chapters.length===0){ chapters.push({id:'ch'+idx+'-'+Math.random().toString(36).slice(2,7), title:curTitle, paragraphs:paras}); idx++; }
+  }
+  lines.forEach(function(line){
+    var md = isMd && /^#{1,3}\s+.+/.test(line.trim());
+    if(isHeading(line) || md){
+      if(curLines.some(function(l){return l.trim();})) flush();
+      saw=true; curTitle=line.trim().replace(/^#{1,3}\s+/,''); curLines=[];
+    } else { curLines.push(line); }
+  });
+  flush();
+  if(!saw && chapters.length===1) chapters[0].title=title;
+  return {id:'book-'+Date.now()+'-'+Math.random().toString(36).slice(2,7), title:title, addedAt:Date.now(), chapters: chapters.length?chapters:[{id:'ch0',title:title,paragraphs:[]}]};
+}
+function readFileAsText(file){
+  return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(String(r.result||''));}; r.onerror=function(){rej(r.error);}; r.readAsText(file,'utf-8'); });
+}
+function titleFromName(name){ return name.replace(/\.(txt|md|markdown|pdf)$/i,'').trim() || 'Truyện không tên'; }
+function readFileAsArrayBuffer(file){
+  return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=function(){rej(r.error);}; r.readAsArrayBuffer(file); });
+}
+/* Extracts PDF text as a pseudo-TXT string (blank line = new paragraph,
+   single newline = soft wrap within a paragraph) so it can reuse parseText()
+   and its existing chapter-heading detection unchanged. */
+async function pdfToRawText(pdf, onProgress){
+  var out = [];
+  for(var p=1; p<=pdf.numPages; p++){
+    if(onProgress) onProgress(p, pdf.numPages);
+    var page = await pdf.getPage(p);
+    var content = await page.getTextContent();
+    var items = content.items;
+    var lines = [], lastY = null, cur = [];
+    items.forEach(function(it){
+      var y = Math.round(it.transform[5]);
+      if(lastY===null || Math.abs(y-lastY) < 2){ cur.push(it); }
+      else { lines.push(cur); cur=[it]; }
+      lastY = y;
+    });
+    if(cur.length) lines.push(cur);
+    var lineInfo = lines.map(function(l){
+      var text = l.map(function(it){return it.str;}).join('').replace(/[ \t]+/g,' ').trim();
+      return {text:text, y: l[0] ? Math.round(l[0].transform[5]) : 0};
+    }).filter(function(l){return l.text;});
+    var gaps = [];
+    for(var i=1;i<lineInfo.length;i++) gaps.push(Math.abs(lineInfo[i-1].y - lineInfo[i].y));
+    gaps.sort(function(a,b){return a-b;});
+    var median = gaps.length ? gaps[Math.floor(gaps.length/2)] : 14;
+    lineInfo.forEach(function(l, idx){
+      var isPara = idx===0 || Math.abs(lineInfo[idx-1].y - l.y) > median*1.4;
+      if(isPara) out.push('');
+      out.push(l.text);
+    });
+    out.push(''); out.push('');
+  }
+  return out.join('\n');
+}
+
+/* ---- library view ---- */
+var libEl=document.getElementById('lib'), readerEl=document.getElementById('reader');
+function renderLibrary(){
+  var books = Object.values(library).sort(function(a,b){return b.addedAt-a.addedAt;});
+  document.getElementById('empty').classList.toggle('hide', books.length>0);
+  var list=document.getElementById('list'); list.innerHTML='';
+  books.forEach(function(book){
+    var li=document.createElement('li');
+    var openBtn=document.createElement('button'); openBtn.className='open';
+    openBtn.innerHTML='<span class="t"></span><span class="m"></span>';
+    openBtn.querySelector('.t').textContent=book.title;
+    openBtn.querySelector('.m').textContent=book.chapters.length+' chương';
+    openBtn.onclick=function(){ openBook(book.id); };
+    var delBtn=document.createElement('button'); delBtn.className='del'; delBtn.textContent='Xóa';
+    delBtn.setAttribute('aria-label','Xóa '+book.title);
+    delBtn.onclick=function(){ delete library[book.id]; set(LS.library, library); var p=get(LS.progress,{}); delete p[book.id]; set(LS.progress,p); renderLibrary(); };
+    li.appendChild(openBtn); li.appendChild(delBtn); list.appendChild(li);
+  });
+}
+function handleFiles(files){
+  var errEl=document.getElementById('err'), statusEl=document.getElementById('status');
+  errEl.classList.add('hide');
+  Array.prototype.slice.call(files).forEach(function(file){
+    var isMd=/\.(md|markdown)$/i.test(file.name), isTxt=/\.txt$/i.test(file.name), isPdf=/\.pdf$/i.test(file.name);
+    if(!isMd && !isTxt && !isPdf){ errEl.textContent='Chỉ hỗ trợ file .txt, .md hoặc .pdf ở phiên bản này.'; errEl.classList.remove('hide'); return; }
+    if(isPdf){
+      if(!pdfjsLib){ errEl.textContent='Không tải được thư viện đọc PDF. Kiểm tra kết nối mạng rồi thử lại.'; errEl.classList.remove('hide'); return; }
+      statusEl.textContent='Đang xử lý "'+file.name+'"…'; statusEl.classList.remove('hide');
+      readFileAsArrayBuffer(file).then(function(buf){
+        return pdfjsLib.getDocument({data:buf}).promise;
+      }).then(function(pdf){
+        return pdfToRawText(pdf, function(p,total){ statusEl.textContent='Đang đọc trang '+p+'/'+total+' của "'+file.name+'"…'; });
+      }).then(function(rawText){
+        statusEl.classList.add('hide');
+        if(!rawText.replace(/\s/g,'')){
+          errEl.textContent='Không trích xuất được chữ từ "'+file.name+'" — có thể đây là PDF dạng ảnh quét.';
+          errEl.classList.remove('hide'); return;
+        }
+        var book=parseText(rawText, titleFromName(file.name), false);
+        library[book.id]=book; set(LS.library, library); renderLibrary(); openBook(book.id);
+      }).catch(function(e){
+        statusEl.classList.add('hide');
+        errEl.textContent='Không thể đọc file PDF "'+file.name+'" ('+((e&&e.message)||'lỗi không rõ')+').';
+        errEl.classList.remove('hide');
+      });
+      return;
+    }
+    readFileAsText(file).then(function(text){
+      var book=parseText(text, titleFromName(file.name), isMd);
+      library[book.id]=book; set(LS.library, library); renderLibrary(); openBook(book.id);
+    }).catch(function(){ errEl.textContent='Không thể đọc file "'+file.name+'".'; errEl.classList.remove('hide'); });
+  });
+}
+document.getElementById('fileInput').addEventListener('change', function(e){ handleFiles(e.target.files); });
+var dropEl=document.getElementById('drop');
+dropEl.addEventListener('dragover', function(e){ e.preventDefault(); dropEl.classList.add('active'); });
+dropEl.addEventListener('dragleave', function(){ dropEl.classList.remove('active'); });
+dropEl.addEventListener('drop', function(e){ e.preventDefault(); dropEl.classList.remove('active'); handleFiles(e.dataTransfer.files); });
+
+/* ---- reader view ---- */
+function openBook(id){
+  currentBook = library[id];
+  if(!currentBook) return;
+  set(LS.lastBook, id);
+  libEl.style.display='none'; readerEl.style.display='block';
+  document.getElementById('bookTitleLbl').textContent = currentBook.title;
+  var inner=document.getElementById('inner'); inner.innerHTML='';
+  currentBook.chapters.forEach(function(ch){
+    var sec=document.createElement('section');
+    var h=document.createElement('h2'); h.id=ch.id; h.textContent=ch.title; h.setAttribute('data-chapter-heading',ch.id);
+    sec.appendChild(h);
+    if(ch.paragraphs.length===0){ var e=document.createElement('p'); e.style.color='var(--ink-soft)'; e.style.fontStyle='italic'; e.textContent='(Chương này không có nội dung.)'; sec.appendChild(e); }
+    else ch.paragraphs.forEach(function(t){ var p=document.createElement('p'); p.textContent=t; sec.appendChild(p); });
+    inner.appendChild(sec);
+  });
+  restored=false;
+  var progress = get(LS.progress,{})[id];
+  currentChapterId = (progress && progress.chapterId) || (currentBook.chapters[0] && currentBook.chapters[0].id);
+  updateChapterLabel();
+  applySettings();
+  requestAnimationFrame(function(){
+    if(progress){ var max=document.documentElement.scrollHeight-window.innerHeight; window.scrollTo({top:Math.max(0,progress.scrollRatio*max)}); }
+    else window.scrollTo({top:0});
+    restored=true;
+  });
+  setupObserver();
+  renderChapterList();
+}
+function updateChapterLabel(){
+  var ch = currentBook.chapters.find(function(c){return c.id===currentChapterId;}) || currentBook.chapters[0];
+  document.getElementById('chapTitleLbl').textContent = ch ? ch.title : '';
+}
+function setupObserver(){
+  if(observer) observer.disconnect();
+  var heads = document.querySelectorAll('[data-chapter-heading]');
+  observer = new IntersectionObserver(function(entries){
+    var visible = entries.filter(function(e){return e.isIntersecting;}).sort(function(a,b){return a.boundingClientRect.top-b.boundingClientRect.top;});
+    if(visible[0]){ currentChapterId = visible[0].target.getAttribute('data-chapter-heading'); updateChapterLabel(); renderChapterList(); }
+  }, {rootMargin:'-10% 0px -70% 0px', threshold:0});
+  heads.forEach(function(h){observer.observe(h);});
+}
+var scrollTimer;
+window.addEventListener('scroll', function(){
+  if(!restored || !currentBook) return;
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(function(){
+    var max=document.documentElement.scrollHeight-window.innerHeight;
+    var ratio = max>0 ? window.scrollY/max : 0;
+    var p = get(LS.progress,{});
+    p[currentBook.id] = {chapterId:currentChapterId, scrollRatio:Math.min(1,Math.max(0,ratio)), updatedAt:Date.now()};
+    set(LS.progress, p);
+  }, 250);
+}, {passive:true});
+
+document.getElementById('backBtn').onclick = function(){
+  if(observer) observer.disconnect();
+  readerEl.style.display='none'; libEl.style.display='block'; currentBook=null; renderLibrary();
+};
+
+/* ---- chapter list overlay ---- */
+function renderChapterList(){
+  var ul=document.getElementById('chapList'); ul.innerHTML='';
+  currentBook.chapters.forEach(function(ch){
+    var li=document.createElement('li');
+    var b=document.createElement('button'); b.textContent=ch.title;
+    if(ch.id===currentChapterId) b.className='active';
+    b.onclick=function(){
+      var el=document.getElementById(ch.id);
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+      currentChapterId=ch.id; updateChapterLabel();
+      document.getElementById('chapOverlay').classList.remove('show');
+    };
+    li.appendChild(b); ul.appendChild(li);
+  });
+}
+document.getElementById('rtitle').onclick=function(){ document.getElementById('chapOverlay').classList.add('show'); };
+document.getElementById('chapOverlay').onclick=function(e){ if(e.target===this) this.classList.remove('show'); };
+document.getElementById('closeChap').onclick=function(){ document.getElementById('chapOverlay').classList.remove('show'); };
+
+/* ---- settings overlay ---- */
+function openSettings(){ document.getElementById('setOverlay').classList.add('show'); }
+document.getElementById('openSettingsTop').onclick = openSettings;
+document.getElementById('openSettingsBottom').onclick = openSettings;
+document.getElementById('setOverlay').onclick=function(e){ if(e.target===this) this.classList.remove('show'); };
+document.getElementById('closeSet').onclick=function(){ document.getElementById('setOverlay').classList.remove('show'); };
+document.getElementById('rangeFs').oninput=function(e){ settings.fontSize=Number(e.target.value); saveSettings(); };
+document.getElementById('rangeLh').oninput=function(e){ settings.lineHeight=Number(e.target.value); saveSettings(); };
+document.getElementById('rangePs').oninput=function(e){ settings.paragraphSpacing=Number(e.target.value); saveSettings(); };
+document.getElementById('rangeCw').oninput=function(e){ settings.contentWidth=Number(e.target.value); saveSettings(); };
+document.getElementById('resetBtn').onclick=function(){ settings=Object.assign({},DEFAULTS); saveSettings(); };
+document.getElementById('decBtn').onclick=function(){ settings.fontSize=Math.max(12,settings.fontSize-2); saveSettings(); };
+document.getElementById('incBtn').onclick=function(){ settings.fontSize=Math.min(36,settings.fontSize+2); saveSettings(); };
+
+/* ---- boot ---- */
+applySettings();
+renderLibrary();
+var lastId = get(LS.lastBook, null);
+if(lastId && library[lastId]) openBook(lastId);
+})();
+</script>
+</body>
+</html>
