@@ -139,9 +139,42 @@ input[type=range]{accent-color:var(--accent)}
 <script>
 (function(){
 "use strict";
-var LS = {settings:'reader:settings', library:'reader:library', progress:'reader:progress', lastBook:'reader:lastBook'};
+var LS = {settings:'reader:settings', libraryMeta:'reader:libraryMeta', progress:'reader:progress', lastBook:'reader:lastBook'};
 function get(k,fb){try{var v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch(e){return fb;}}
-function set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function set(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){return false;}}
+
+/* IndexedDB stores full book content (can be several MB for a long novel or
+   a PDF), which is far more reliable than localStorage's ~5MB-per-origin
+   limit. localStorage only keeps small metadata (title, chapter count,
+   reading position), so the library survives even for big books. */
+var DB_NAME='storyReaderDB', DB_VERSION=1, STORE='books';
+function idbOpen(){
+  return new Promise(function(res,rej){
+    if(!window.indexedDB){ rej(new Error('no-idb')); return; }
+    var req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = function(){ req.result.createObjectStore(STORE, {keyPath:'id'}); };
+    req.onsuccess = function(){ res(req.result); };
+    req.onerror = function(){ rej(req.error); };
+  });
+}
+function idbPut(book){
+  return idbOpen().then(function(db){ return new Promise(function(res,rej){
+    var tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).put(book);
+    tx.oncomplete=function(){res();}; tx.onerror=function(){rej(tx.error);};
+  });});
+}
+function idbGet(id){
+  return idbOpen().then(function(db){ return new Promise(function(res,rej){
+    var req=db.transaction(STORE,'readonly').objectStore(STORE).get(id);
+    req.onsuccess=function(){res(req.result);}; req.onerror=function(){rej(req.error);};
+  });});
+}
+function idbDelete(id){
+  return idbOpen().then(function(db){ return new Promise(function(res,rej){
+    var tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).delete(id);
+    tx.oncomplete=function(){res();}; tx.onerror=function(){rej(tx.error);};
+  });});
+}
 
 var DEFAULTS = {fontSize:18, lineHeight:1.7, fontFamily:'vnSerif', theme:null, paragraphSpacing:1, contentWidth:760};
 var FONTS = {
@@ -157,8 +190,23 @@ var pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
 if(pdfjsLib){ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }
 
 var settings = Object.assign({}, DEFAULTS, get(LS.settings, {}));
-var library = get(LS.library, {});
+var libraryMeta = get(LS.libraryMeta, {});
 var currentBook = null, currentChapterId = null, restored = false, observer = null;
+
+/* One-time migration from the older version that stored full book content
+   directly in localStorage under 'reader:library'. Moves it into IndexedDB
+   so existing readers don't lose their saved books when the file is updated. */
+(function migrateOldLibrary(){
+  var old = get('reader:library', null);
+  if(!old) return;
+  Object.keys(old).forEach(function(id){
+    var book = old[id];
+    idbPut(book).catch(function(){});
+    libraryMeta[id] = {id:id, title:book.title, addedAt:book.addedAt, chapterCount:book.chapters.length};
+  });
+  set(LS.libraryMeta, libraryMeta);
+  try{ localStorage.removeItem('reader:library'); }catch(e){}
+})();
 
 function saveSettings(){ set(LS.settings, settings); applySettings(); }
 function applySettings(){
@@ -265,21 +313,35 @@ async function pdfToRawText(pdf, onProgress){
 /* ---- library view ---- */
 var libEl=document.getElementById('lib'), readerEl=document.getElementById('reader');
 function renderLibrary(){
-  var books = Object.values(library).sort(function(a,b){return b.addedAt-a.addedAt;});
+  var books = Object.values(libraryMeta).sort(function(a,b){return b.addedAt-a.addedAt;});
   document.getElementById('empty').classList.toggle('hide', books.length>0);
   var list=document.getElementById('list'); list.innerHTML='';
-  books.forEach(function(book){
+  books.forEach(function(meta){
     var li=document.createElement('li');
     var openBtn=document.createElement('button'); openBtn.className='open';
     openBtn.innerHTML='<span class="t"></span><span class="m"></span>';
-    openBtn.querySelector('.t').textContent=book.title;
-    openBtn.querySelector('.m').textContent=book.chapters.length+' chương';
-    openBtn.onclick=function(){ openBook(book.id); };
+    openBtn.querySelector('.t').textContent=meta.title;
+    openBtn.querySelector('.m').textContent=meta.chapterCount+' chương';
+    openBtn.onclick=function(){ openBook(meta.id); };
     var delBtn=document.createElement('button'); delBtn.className='del'; delBtn.textContent='Xóa';
-    delBtn.setAttribute('aria-label','Xóa '+book.title);
-    delBtn.onclick=function(){ delete library[book.id]; set(LS.library, library); var p=get(LS.progress,{}); delete p[book.id]; set(LS.progress,p); renderLibrary(); };
+    delBtn.setAttribute('aria-label','Xóa '+meta.title);
+    delBtn.onclick=function(){
+      delete libraryMeta[meta.id]; set(LS.libraryMeta, libraryMeta); idbDelete(meta.id).catch(function(){});
+      var p=get(LS.progress,{}); delete p[meta.id]; set(LS.progress,p); renderLibrary();
+    };
     li.appendChild(openBtn); li.appendChild(delBtn); list.appendChild(li);
   });
+}
+function saveNewBook(book){
+  libraryMeta[book.id] = {id:book.id, title:book.title, addedAt:book.addedAt, chapterCount:book.chapters.length};
+  set(LS.libraryMeta, libraryMeta);
+  var errEl=document.getElementById('err');
+  idbPut(book).catch(function(){
+    errEl.textContent='Không lưu được truyện vào bộ nhớ trình duyệt (IndexedDB bị chặn, ví dụ ở chế độ ẩn danh). Truyện vẫn đọc được trong phiên này nhưng sẽ mất khi tải lại trang.';
+    errEl.classList.remove('hide');
+  });
+  renderLibrary();
+  openBookWithData(book);
 }
 function handleFiles(files){
   var errEl=document.getElementById('err'), statusEl=document.getElementById('status');
@@ -301,7 +363,7 @@ function handleFiles(files){
           errEl.classList.remove('hide'); return;
         }
         var book=parseText(rawText, titleFromName(file.name), false);
-        library[book.id]=book; set(LS.library, library); renderLibrary(); openBook(book.id);
+        saveNewBook(book);
       }).catch(function(e){
         statusEl.classList.add('hide');
         errEl.textContent='Không thể đọc file PDF "'+file.name+'" ('+((e&&e.message)||'lỗi không rõ')+').';
@@ -311,7 +373,7 @@ function handleFiles(files){
     }
     readFileAsText(file).then(function(text){
       var book=parseText(text, titleFromName(file.name), isMd);
-      library[book.id]=book; set(LS.library, library); renderLibrary(); openBook(book.id);
+      saveNewBook(book);
     }).catch(function(){ errEl.textContent='Không thể đọc file "'+file.name+'".'; errEl.classList.remove('hide'); });
   });
 }
@@ -323,29 +385,67 @@ dropEl.addEventListener('drop', function(e){ e.preventDefault(); dropEl.classLis
 
 /* ---- reader view ---- */
 function openBook(id){
-  currentBook = library[id];
-  if(!currentBook) return;
-  set(LS.lastBook, id);
+  idbGet(id).then(function(book){
+    if(!book){
+      var errEl=document.getElementById('err');
+      errEl.textContent='Không tìm thấy nội dung truyện này trong bộ nhớ trình duyệt — có thể đã bị xóa hoặc chặn IndexedDB. Vui lòng tải lại file.';
+      errEl.classList.remove('hide');
+      delete libraryMeta[id]; set(LS.libraryMeta, libraryMeta); renderLibrary();
+      return;
+    }
+    openBookWithData(book);
+  }).catch(function(){
+    var errEl=document.getElementById('err');
+    errEl.textContent='Không đọc được dữ liệu truyện từ bộ nhớ trình duyệt.';
+    errEl.classList.remove('hide');
+  });
+}
+function chapterIdOfAnchor(el){
+  if(el.hasAttribute('data-chapter-heading')) return el.getAttribute('data-chapter-heading');
+  var i = el.id.lastIndexOf('__p');
+  return i>-1 ? el.id.slice(0,i) : currentChapterId;
+}
+function openBookWithData(book){
+  currentBook = book;
+  set(LS.lastBook, book.id);
   libEl.style.display='none'; readerEl.style.display='block';
   document.getElementById('bookTitleLbl').textContent = currentBook.title;
   var inner=document.getElementById('inner'); inner.innerHTML='';
   currentBook.chapters.forEach(function(ch){
     var sec=document.createElement('section');
-    var h=document.createElement('h2'); h.id=ch.id; h.textContent=ch.title; h.setAttribute('data-chapter-heading',ch.id);
+    var h=document.createElement('h2'); h.id=ch.id; h.textContent=ch.title;
+    h.setAttribute('data-chapter-heading',ch.id); h.setAttribute('data-anchor','1');
     sec.appendChild(h);
-    if(ch.paragraphs.length===0){ var e=document.createElement('p'); e.style.color='var(--ink-soft)'; e.style.fontStyle='italic'; e.textContent='(Chương này không có nội dung.)'; sec.appendChild(e); }
-    else ch.paragraphs.forEach(function(t){ var p=document.createElement('p'); p.textContent=t; sec.appendChild(p); });
+    if(ch.paragraphs.length===0){
+      var e=document.createElement('p'); e.style.color='var(--ink-soft)'; e.style.fontStyle='italic';
+      e.textContent='(Chương này không có nội dung.)'; sec.appendChild(e);
+    } else {
+      ch.paragraphs.forEach(function(t, i){
+        var p=document.createElement('p'); p.textContent=t;
+        p.id = ch.id+'__p'+i; p.setAttribute('data-anchor','1');
+        sec.appendChild(p);
+      });
+    }
     inner.appendChild(sec);
   });
   restored=false;
-  var progress = get(LS.progress,{})[id];
+  var progress = get(LS.progress,{})[book.id];
   currentChapterId = (progress && progress.chapterId) || (currentBook.chapters[0] && currentBook.chapters[0].id);
   updateChapterLabel();
   applySettings();
-  requestAnimationFrame(function(){
-    if(progress){ var max=document.documentElement.scrollHeight-window.innerHeight; window.scrollTo({top:Math.max(0,progress.scrollRatio*max)}); }
-    else window.scrollTo({top:0});
-    restored=true;
+  /* Wait for web fonts + a couple of layout passes before restoring, so the
+     saved anchor lands in the right place even if font loading shifts
+     line-wrapping after the first paint. Restoring by anchor element (not a
+     pixel ratio) means it stays correct even if font-size/line-height were
+     changed since the book was last read. */
+  var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
+  fontsReady.then(function(){
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      var el = progress && progress.anchorId ? document.getElementById(progress.anchorId) : null;
+      if(el) el.scrollIntoView({block:'start'});
+      else window.scrollTo({top:0});
+      restored = true;
+    }); });
   });
   setupObserver();
   renderChapterList();
@@ -368,12 +468,14 @@ window.addEventListener('scroll', function(){
   if(!restored || !currentBook) return;
   clearTimeout(scrollTimer);
   scrollTimer = setTimeout(function(){
-    var max=document.documentElement.scrollHeight-window.innerHeight;
-    var ratio = max>0 ? window.scrollY/max : 0;
+    var headerH = document.getElementById('rhead').offsetHeight || 60;
+    var hit = document.elementFromPoint(Math.floor(window.innerWidth/2), headerH+12);
+    var anchor = hit && hit.closest ? hit.closest('[data-anchor]') : null;
+    if(!anchor) return;
     var p = get(LS.progress,{});
-    p[currentBook.id] = {chapterId:currentChapterId, scrollRatio:Math.min(1,Math.max(0,ratio)), updatedAt:Date.now()};
+    p[currentBook.id] = {chapterId: chapterIdOfAnchor(anchor), anchorId: anchor.id, updatedAt: Date.now()};
     set(LS.progress, p);
-  }, 250);
+  }, 300);
 }, {passive:true});
 
 document.getElementById('backBtn').onclick = function(){
@@ -419,7 +521,7 @@ document.getElementById('incBtn').onclick=function(){ settings.fontSize=Math.min
 applySettings();
 renderLibrary();
 var lastId = get(LS.lastBook, null);
-if(lastId && library[lastId]) openBook(lastId);
+if(lastId && libraryMeta[lastId]) openBook(lastId);
 })();
 </script>
 </body>
